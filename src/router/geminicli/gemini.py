@@ -103,7 +103,7 @@ async def generate_content(
 
     # 调用 API 层的非流式请求
     from src.api.geminicli import non_stream_request
-    response = await non_stream_request(body=api_request)
+    response = await non_stream_request(body=api_request, api_tag="geminicli/gemini")
 
     # 解包装响应：GeminiCli API 返回的格式有额外的 response 包装层
     # 需要提取 response.response 并返回标准 Gemini 格式
@@ -166,7 +166,7 @@ async def stream_generate_content(
         # 异步发送实际请求
         async def get_response():
             from src.api.geminicli import non_stream_request
-            response = await non_stream_request(body=api_request)
+            response = await non_stream_request(body=api_request, api_tag="geminicli/gemini")
             return response
 
         # 创建请求任务
@@ -285,7 +285,7 @@ async def stream_generate_content(
         # 定义流式请求函数（返回 StreamingResponse）
         async def stream_request_wrapper(payload):
             # stream_request 返回异步生成器，需要包装成 StreamingResponse
-            stream_gen = stream_request(body=payload, native=False)
+            stream_gen = stream_request(body=payload, native=False, api_tag="geminicli/gemini")
             return StreamingResponse(stream_gen, media_type="text/event-stream")
 
         # 创建反截断处理器
@@ -348,7 +348,7 @@ async def stream_generate_content(
 
         # 所有流式请求都使用非 native 模式（SSE格式）并展开 response 包装
         log.debug(f"[GEMINICLI] 使用非native模式，将展开response包装")
-        stream_gen = stream_request(body=api_request, native=False)
+        stream_gen = stream_request(body=api_request, native=False, api_tag="geminicli/gemini")
 
         # 展开 response 包装
         async for chunk in stream_gen:

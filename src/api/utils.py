@@ -490,3 +490,122 @@ def parse_quota_reset_timestamp(error_response: dict) -> Optional[float]:
 
     except Exception:
         return None
+
+
+def _safe_token_int(value: Any) -> int:
+    try:
+        ivalue = int(value or 0)
+        return ivalue if ivalue > 0 else 0
+    except Exception:
+        return 0
+
+
+def extract_token_stats_from_dict(payload: Any) -> Dict[str, int]:
+    if not isinstance(payload, dict):
+        return {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "cached_tokens": 0,
+            "total_tokens": 0,
+        }
+
+    usage_meta = (
+        payload.get("usageMetadata")
+        or payload.get("usage_metadata")
+        or payload.get("response", {}).get("usageMetadata")
+        or payload.get("response", {}).get("usage_metadata")
+    )
+
+    if isinstance(usage_meta, dict):
+        input_tokens = _safe_token_int(usage_meta.get("promptTokenCount"))
+        output_tokens = _safe_token_int(usage_meta.get("candidatesTokenCount"))
+        reasoning_tokens = _safe_token_int(usage_meta.get("thoughtsTokenCount"))
+        cached_tokens = _safe_token_int(usage_meta.get("cachedContentTokenCount"))
+        total_tokens = _safe_token_int(usage_meta.get("totalTokenCount"))
+        if total_tokens == 0:
+            total_tokens = input_tokens + output_tokens + reasoning_tokens
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning_tokens,
+            "cached_tokens": cached_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    usage = payload.get("usage") or payload.get("response", {}).get("usage")
+    if isinstance(usage, dict):
+        input_tokens = _safe_token_int(usage.get("prompt_tokens") or usage.get("input_tokens"))
+        output_tokens = _safe_token_int(
+            usage.get("completion_tokens") or usage.get("output_tokens")
+        )
+        reasoning_tokens = _safe_token_int(
+            (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+            or (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+        )
+        cached_tokens = _safe_token_int(
+            (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+            or (usage.get("input_tokens_details") or {}).get("cached_tokens")
+            or usage.get("cache_read_input_tokens")
+            or usage.get("cache_creation_input_tokens")
+        )
+        total_tokens = _safe_token_int(usage.get("total_tokens"))
+        if total_tokens == 0:
+            total_tokens = input_tokens + output_tokens + reasoning_tokens
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning_tokens,
+            "cached_tokens": cached_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "total_tokens": 0,
+    }
+
+
+def extract_token_stats_from_text(payload_text: str) -> Dict[str, int]:
+    if not payload_text:
+        return extract_token_stats_from_dict({})
+    raw = payload_text.strip()
+    if raw.startswith("data:"):
+        raw = raw[5:].strip()
+    if raw == "[DONE]":
+        return extract_token_stats_from_dict({})
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return extract_token_stats_from_dict({})
+    return extract_token_stats_from_dict(data)
+
+
+async def record_panel_usage_event(
+    api_tag: str,
+    model_name: str,
+    credential_name: str,
+    success: bool,
+    status_code: int = 200,
+    token_stats: Optional[Dict[str, Any]] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    try:
+        from src.usage_tracker import get_usage_tracker
+
+        tracker = get_usage_tracker()
+        tracker.record(
+            api=api_tag or "unknown",
+            model=model_name or "unknown",
+            source=credential_name or "unknown",
+            auth_index=credential_name or "-",
+            failed=not success,
+            tokens=token_stats or {},
+            status_code=status_code,
+            error_message=error_message,
+        )
+    except Exception as e:
+        log.debug(f"record_panel_usage_event failed: {e}")

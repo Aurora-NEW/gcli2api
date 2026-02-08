@@ -1000,6 +1000,8 @@ function triggerTabDataLoad(tabName) {
     if (tabName === 'manage') AppState.creds.refresh();
     if (tabName === 'antigravity-manage') AppState.antigravityCreds.refresh();
     if (tabName === 'config') loadConfig();
+    if (tabName === 'usage') refreshUsageStats();
+    if (tabName === 'monitor') initMonitorPanel();
     if (tabName === 'logs') connectWebSocket();
 }
 
@@ -2771,6 +2773,7 @@ function restoreOfficialUrls() {
 async function refreshUsageStats() {
     const loading = document.getElementById('usageLoading');
     const list = document.getElementById('usageList');
+    if (!loading || !list) return;
 
     try {
         loading.style.display = 'block';
@@ -2794,9 +2797,12 @@ async function refreshUsageStats() {
             AppState.usageStatsData = statsData.success ? statsData.data : statsData;
 
             const aggData = aggregatedData.success ? aggregatedData.data : aggregatedData;
-            document.getElementById('totalApiCalls').textContent = aggData.total_calls_24h || 0;
-            document.getElementById('totalFiles').textContent = aggData.total_files || 0;
-            document.getElementById('avgCallsPerFile').textContent = (aggData.avg_calls_per_file || 0).toFixed(1);
+            const totalApiCalls = document.getElementById('totalApiCalls');
+            const totalFiles = document.getElementById('totalFiles');
+            const avgCallsPerFile = document.getElementById('avgCallsPerFile');
+            if (totalApiCalls) totalApiCalls.textContent = aggData.total_calls_24h || 0;
+            if (totalFiles) totalFiles.textContent = aggData.total_files || 0;
+            if (avgCallsPerFile) avgCallsPerFile.textContent = (aggData.avg_calls_per_file || 0).toFixed(1);
 
             renderUsageList();
 
@@ -2890,6 +2896,28 @@ async function resetAllUsageStats() {
     } catch (error) {
         showStatus(`网络错误: ${error.message}`, 'error');
     }
+}
+
+function openMonitorDashboard() {
+    window.open('/front/monitor/index.html', '_blank');
+}
+
+function initMonitorPanel() {
+    const iframe = document.getElementById('monitorIframe');
+    if (!iframe) return;
+    if (!iframe.getAttribute('src')) {
+        iframe.setAttribute('src', '/front/monitor/index.html');
+    }
+}
+
+function refreshMonitorPanel() {
+    const iframe = document.getElementById('monitorIframe');
+    if (!iframe) return;
+    if (!iframe.getAttribute('src')) {
+        iframe.setAttribute('src', '/front/monitor/index.html');
+        return;
+    }
+    iframe.contentWindow?.location.reload();
 }
 
 // =====================================================================

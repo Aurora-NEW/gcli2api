@@ -30,6 +30,8 @@ from src.api.utils import (
     record_api_call_error,
     parse_and_log_cooldown,
     collect_streaming_response,
+    extract_token_stats_from_text,
+    record_panel_usage_event,
 )
 
 # ==================== 全局凭证管理器 ====================
@@ -77,6 +79,7 @@ async def stream_request(
     body: Dict[str, Any],
     native: bool = False,
     headers: Optional[Dict[str, str]] = None,
+    api_tag: str = "antigravity/unknown",
 ):
     """
     流式请求函数
@@ -99,6 +102,14 @@ async def stream_request(
     if not cred_result:
         # 如果返回值是None，直接返回错误500
         log.error("[ANTIGRAVITY STREAM] 当前无可用凭证")
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name="unknown",
+            success=False,
+            status_code=500,
+            error_message="当前无可用凭证",
+        )
         yield Response(
             content=json.dumps({"error": "当前无可用凭证"}),
             status_code=500,
@@ -112,6 +123,14 @@ async def stream_request(
 
     if not access_token:
         log.error(f"[ANTIGRAVITY STREAM] No access token in credential: {current_file}")
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name=current_file,
+            success=False,
+            status_code=500,
+            error_message="凭证中没有访问令牌",
+        )
         yield Response(
             content=json.dumps({"error": "凭证中没有访问令牌"}),
             status_code=500,
@@ -166,6 +185,7 @@ async def stream_request(
     for attempt in range(max_retries + 1):
         success_recorded = False  # 标记是否已记录成功
         need_retry = False  # 标记是否需要重试
+        latest_token_stats: Dict[str, int] = {}
 
         try:
             async for chunk in stream_post_async(
@@ -212,6 +232,15 @@ async def stream_request(
                             cooldown_until, mode="antigravity", model_name=model_name,
                             error_message=error_body
                         )
+                        await record_panel_usage_event(
+                            api_tag=api_tag,
+                            model_name=model_name,
+                            credential_name=current_file,
+                            success=False,
+                            status_code=status_code,
+                            token_stats=extract_token_stats_from_text(error_body),
+                            error_message=error_body,
+                        )
 
                         # 检查是否应该重试
                         should_retry = await handle_error_with_retry(
@@ -236,6 +265,15 @@ async def stream_request(
                             None, mode="antigravity", model_name=model_name,
                             error_message=error_body
                         )
+                        await record_panel_usage_event(
+                            api_tag=api_tag,
+                            model_name=model_name,
+                            credential_name=current_file,
+                            success=False,
+                            status_code=status_code,
+                            token_stats=extract_token_stats_from_text(error_body),
+                            error_message=error_body,
+                        )
                         yield chunk
                         return
                 else:
@@ -254,11 +292,24 @@ async def stream_request(
                     else:
                         log.debug(f"[ANTIGRAVITY STREAM RAW] chunk(str): {chunk}")
 
+                    chunk_text = chunk.decode("utf-8", errors="ignore") if isinstance(chunk, bytes) else str(chunk)
+                    parsed_tokens = extract_token_stats_from_text(chunk_text)
+                    if parsed_tokens.get("total_tokens", 0) > 0:
+                        latest_token_stats = parsed_tokens
+
                     yield chunk
 
             # 流式请求完成，检查结果
             if success_recorded:
                 log.debug(f"[ANTIGRAVITY STREAM] 流式响应完成，模型: {model_name}")
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=True,
+                    status_code=200,
+                    token_stats=latest_token_stats,
+                )
                 return
             elif not need_retry:
                 # 没有收到任何数据（空回复），需要重试
@@ -267,6 +318,14 @@ async def stream_request(
                     credential_manager, current_file, 200,
                     None, mode="antigravity", model_name=model_name,
                     error_message="Empty response from API"
+                )
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=False,
+                    status_code=200,
+                    error_message="Empty response from API",
                 )
                 
                 if attempt < max_retries:
@@ -308,6 +367,14 @@ async def stream_request(
 
                 if not await refresh_credential_fast():
                     log.error("[ANTIGRAVITY STREAM] 重试时无可用凭证或令牌")
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=500,
+                        error_message="重试时无可用凭证或令牌",
+                    )
                     yield Response(
                         content=json.dumps({"error": "当前无可用凭证"}),
                         status_code=500,
@@ -325,6 +392,14 @@ async def stream_request(
             else:
                 # 所有重试都失败，返回最后一次的错误（如果有）
                 log.error(f"[ANTIGRAVITY STREAM] 所有重试均失败，最后异常: {e}")
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=False,
+                    status_code=last_error_response.status_code if last_error_response else 500,
+                    error_message=str(e),
+                )
                 if last_error_response:
                     yield last_error_response
                 else:
@@ -340,6 +415,7 @@ async def stream_request(
 async def non_stream_request(
     body: Dict[str, Any],
     headers: Optional[Dict[str, str]] = None,
+    api_tag: str = "antigravity/unknown",
 ) -> Response:
     """
     非流式请求函数
@@ -356,7 +432,7 @@ async def non_stream_request(
         log.debug("[ANTIGRAVITY] 使用流式收集模式实现非流式请求")
 
         # 调用stream_request获取流
-        stream = stream_request(body=body, native=False, headers=headers)
+        stream = stream_request(body=body, native=False, headers=headers, api_tag=api_tag)
 
         # 收集流式响应
         # stream_request是一个异步生成器，可能yield Response（错误）或流数据
@@ -376,6 +452,14 @@ async def non_stream_request(
     if not cred_result:
         # 如果返回值是None，直接返回错误500
         log.error("[ANTIGRAVITY] 当前无可用凭证")
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name="unknown",
+            success=False,
+            status_code=500,
+            error_message="当前无可用凭证",
+        )
         return Response(
             content=json.dumps({"error": "当前无可用凭证"}),
             status_code=500,
@@ -388,6 +472,14 @@ async def non_stream_request(
 
     if not access_token:
         log.error(f"[ANTIGRAVITY] No access token in credential: {current_file}")
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name=current_file,
+            success=False,
+            status_code=500,
+            error_message="凭证中没有访问令牌",
+        )
         return Response(
             content=json.dumps({"error": "凭证中没有访问令牌"}),
             status_code=500,
@@ -463,6 +555,14 @@ async def non_stream_request(
                         None, mode="antigravity", model_name=model_name,
                         error_message="Empty response from API"
                     )
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=200,
+                        error_message="Empty response from API",
+                    )
                     
                     if attempt < max_retries:
                         need_retry = True
@@ -477,6 +577,14 @@ async def non_stream_request(
                     # 正常响应
                     await record_api_call_success(
                         credential_manager, current_file, mode="antigravity", model_name=model_name
+                    )
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=True,
+                        status_code=200,
+                        token_stats=extract_token_stats_from_text(response.text),
                     )
                     return Response(
                         content=response.content,
@@ -513,7 +621,7 @@ async def non_stream_request(
 
                     # 记录错误
                     cooldown_until = None
-                    if status_code == 429 or status_code == 503 and error_text:
+                    if (status_code == 429 or status_code == 503) and error_text:
                         # 使用已缓存的error_text解析冷却时间
                         try:
                             cooldown_until = await parse_and_log_cooldown(error_text, mode="antigravity")
@@ -524,6 +632,15 @@ async def non_stream_request(
                         credential_manager, current_file, status_code,
                         cooldown_until, mode="antigravity", model_name=model_name,
                         error_message=error_text
+                    )
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=status_code,
+                        token_stats=extract_token_stats_from_text(error_text),
+                        error_message=error_text,
                     )
 
                     # 检查是否应该重试
@@ -538,6 +655,15 @@ async def non_stream_request(
                     else:
                         # 不重试，直接返回原始错误
                         log.error(f"[ANTIGRAVITY] 达到最大重试次数或不应重试，返回原始错误")
+                        await record_panel_usage_event(
+                            api_tag=api_tag,
+                            model_name=model_name,
+                            credential_name=current_file,
+                            success=False,
+                            status_code=status_code,
+                            token_stats=extract_token_stats_from_text(error_text),
+                            error_message=error_text,
+                        )
                         return last_error_response
                 else:
                     # 错误码不在禁用码当中，直接返回，无需重试
@@ -546,6 +672,15 @@ async def non_stream_request(
                         credential_manager, current_file, status_code,
                         None, mode="antigravity", model_name=model_name,
                         error_message=error_text
+                    )
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=status_code,
+                        token_stats=extract_token_stats_from_text(error_text),
+                        error_message=error_text,
                     )
                     return last_error_response
             
@@ -577,6 +712,14 @@ async def non_stream_request(
 
                 if not await refresh_credential_fast():
                     log.error("[ANTIGRAVITY] 重试时无可用凭证或令牌")
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=500,
+                        error_message="重试时无可用凭证或令牌",
+                    )
                     return Response(
                         content=json.dumps({"error": "当前无可用凭证"}),
                         status_code=500,
@@ -594,8 +737,24 @@ async def non_stream_request(
                 # 所有重试都失败，返回最后一次的错误（如果有）或500错误
                 log.error(f"[ANTIGRAVITY] 所有重试均失败，最后异常: {e}")
                 if last_error_response:
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=last_error_response.status_code,
+                        error_message=str(e),
+                    )
                     return last_error_response
                 else:
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=500,
+                        error_message=str(e),
+                    )
                     return Response(
                         content=json.dumps({"error": f"非流式请求异常: {str(e)}"}),
                         status_code=500,
@@ -605,8 +764,24 @@ async def non_stream_request(
     # 所有重试都失败，返回最后一次的原始错误（如果有）或500错误
     log.error("[ANTIGRAVITY] 所有重试均失败")
     if last_error_response:
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name=current_file,
+            success=False,
+            status_code=last_error_response.status_code,
+            error_message="所有重试均失败",
+        )
         return last_error_response
     else:
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name=current_file,
+            success=False,
+            status_code=500,
+            error_message="所有重试均失败",
+        )
         return Response(
             content=json.dumps({"error": "所有重试均失败"}),
             status_code=500,

@@ -31,6 +31,8 @@ from src.api.utils import (
     record_api_call_success,
     record_api_call_error,
     parse_and_log_cooldown,
+    extract_token_stats_from_text,
+    record_panel_usage_event,
 )
 from src.utils import GEMINICLI_USER_AGENT
 
@@ -88,6 +90,7 @@ async def stream_request(
     body: Dict[str, Any],
     native: bool = False,
     headers: Optional[Dict[str, str]] = None,
+    api_tag: str = "geminicli/unknown",
 ):
     """
     流式请求函数
@@ -110,6 +113,14 @@ async def stream_request(
 
     if not cred_result:
         # 如果返回值是None，直接返回错误500
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name="unknown",
+            success=False,
+            status_code=500,
+            error_message="当前无可用凭证",
+        )
         yield Response(
             content=json.dumps({"error": "当前无可用凭证"}),
             status_code=500,
@@ -132,6 +143,14 @@ async def stream_request(
 
     except Exception as e:
         log.error(f"准备请求失败: {e}")
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name=current_file,
+            success=False,
+            status_code=500,
+            error_message=str(e),
+        )
         yield Response(
             content=json.dumps({"error": f"准备请求失败: {str(e)}"}),
             status_code=500,
@@ -174,6 +193,7 @@ async def stream_request(
     for attempt in range(max_retries + 1):
         success_recorded = False  # 标记是否已记录成功
         need_retry = False  # 标记是否需要重试
+        latest_token_stats: Dict[str, int] = {}
 
         try:
             async for chunk in stream_post_async(
@@ -220,6 +240,15 @@ async def stream_request(
                             cooldown_until, mode="geminicli", model_name=model_name,
                             error_message=error_body
                         )
+                        await record_panel_usage_event(
+                            api_tag=api_tag,
+                            model_name=model_name,
+                            credential_name=current_file,
+                            success=False,
+                            status_code=status_code,
+                            token_stats=extract_token_stats_from_text(error_body),
+                            error_message=error_body,
+                        )
 
                         # 检查是否应该重试
                         should_retry = await handle_error_with_retry(
@@ -255,6 +284,15 @@ async def stream_request(
                             None, mode="geminicli", model_name=model_name,
                             error_message=error_body
                         )
+                        await record_panel_usage_event(
+                            api_tag=api_tag,
+                            model_name=model_name,
+                            credential_name=current_file,
+                            success=False,
+                            status_code=status_code,
+                            token_stats=extract_token_stats_from_text(error_body),
+                            error_message=error_body,
+                        )
 
                         # 预热下一个凭证（会自动跳过preview=False的凭证）
                         if next_cred_task is None and attempt < max_retries:
@@ -280,6 +318,15 @@ async def stream_request(
                             None, mode="geminicli", model_name=model_name,
                             error_message=error_body
                         )
+                        await record_panel_usage_event(
+                            api_tag=api_tag,
+                            model_name=model_name,
+                            credential_name=current_file,
+                            success=False,
+                            status_code=status_code,
+                            token_stats=extract_token_stats_from_text(error_body),
+                            error_message=error_body,
+                        )
                         yield chunk
                         return
                 else:
@@ -292,11 +339,24 @@ async def stream_request(
                         success_recorded = True
                         log.debug(f"[GEMINICLI STREAM] 开始接收流式响应，模型: {model_name}")
 
+                    chunk_text = chunk.decode("utf-8", errors="ignore") if isinstance(chunk, bytes) else str(chunk)
+                    parsed_tokens = extract_token_stats_from_text(chunk_text)
+                    if parsed_tokens.get("total_tokens", 0) > 0:
+                        latest_token_stats = parsed_tokens
+
                     yield chunk
 
             # 流式请求完成，检查结果
             if success_recorded:
                 log.debug(f"[GEMINICLI STREAM] 流式响应完成，模型: {model_name}")
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=True,
+                    status_code=200,
+                    token_stats=latest_token_stats,
+                )
                 return
 
             # 统一处理重试
@@ -328,6 +388,14 @@ async def stream_request(
 
                 if not await refresh_credential_fast():
                     log.error("[GEMINICLI STREAM] 重试时无可用凭证或刷新失败")
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=500,
+                        error_message="重试时无可用凭证或刷新失败",
+                    )
                     yield Response(
                         content=json.dumps({"error": "当前无可用凭证"}),
                         status_code=500,
@@ -345,6 +413,14 @@ async def stream_request(
             else:
                 # 所有重试都失败，返回最后一次的错误（如果有）
                 log.error(f"[GEMINICLI STREAM] 所有重试均失败，最后异常: {e}")
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=False,
+                    status_code=last_error_response.status_code if last_error_response else 500,
+                    error_message=str(e),
+                )
                 if last_error_response:
                     yield last_error_response
                 else:
@@ -360,6 +436,7 @@ async def stream_request(
 async def non_stream_request(
     body: Dict[str, Any],
     headers: Optional[Dict[str, str]] = None,
+    api_tag: str = "geminicli/unknown",
 ) -> Response:
     """
     非流式请求函数
@@ -382,6 +459,14 @@ async def non_stream_request(
 
     if not cred_result:
         # 如果返回值是None，直接返回错误500
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name="unknown",
+            success=False,
+            status_code=500,
+            error_message="当前无可用凭证",
+        )
         return Response(
             content=json.dumps({"error": "当前无可用凭证"}),
             status_code=500,
@@ -403,6 +488,14 @@ async def non_stream_request(
 
     except Exception as e:
         log.error(f"准备请求失败: {e}")
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name=current_file,
+            success=False,
+            status_code=500,
+            error_message=str(e),
+        )
         return Response(
             content=json.dumps({"error": f"准备请求失败: {str(e)}"}),
             status_code=500,
@@ -456,6 +549,14 @@ async def non_stream_request(
             if status_code == 200:
                 await record_api_call_success(
                     credential_manager, current_file, mode="geminicli", model_name=model_name
+                )
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=True,
+                    status_code=200,
+                    token_stats=extract_token_stats_from_text(response.text),
                 )
                 # 创建响应头,移除压缩相关的header避免重复解压
                 response_headers = dict(response.headers)
@@ -514,6 +615,15 @@ async def non_stream_request(
                     cooldown_until, mode="geminicli", model_name=model_name,
                     error_message=error_text
                 )
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=False,
+                    status_code=status_code,
+                    token_stats=extract_token_stats_from_text(error_text),
+                    error_message=error_text,
+                )
 
                 # 检查是否应该重试（会自动处理禁用逻辑）
                 should_retry = await handle_error_with_retry(
@@ -551,6 +661,14 @@ async def non_stream_request(
 
                     if not await refresh_credential_fast():
                         log.error("[NON-STREAM] 重试时无可用凭证或刷新失败")
+                        await record_panel_usage_event(
+                            api_tag=api_tag,
+                            model_name=model_name,
+                            credential_name=current_file,
+                            success=False,
+                            status_code=500,
+                            error_message="重试时无可用凭证或刷新失败",
+                        )
                         return Response(
                             content=json.dumps({"error": "当前无可用凭证"}),
                             status_code=500,
@@ -560,6 +678,15 @@ async def non_stream_request(
                 else:
                     # 不重试，直接返回原始错误
                     log.error(f"[NON-STREAM] 达到最大重试次数或不应重试，返回原始错误")
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=status_code,
+                        token_stats=extract_token_stats_from_text(error_text),
+                        error_message=error_text,
+                    )
                     return last_error_response
             elif status_code == 404 and "preview" in model_name.lower():
                 # 特殊处理：preview模型返回404，说明该凭证不支持preview模型
@@ -579,6 +706,15 @@ async def non_stream_request(
                     credential_manager, current_file, status_code,
                     None, mode="geminicli", model_name=model_name,
                     error_message=error_text
+                )
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=False,
+                    status_code=status_code,
+                    token_stats=extract_token_stats_from_text(error_text),
+                    error_message=error_text,
                 )
 
                 # 预热下一个凭证（会自动跳过preview=False的凭证）
@@ -618,6 +754,14 @@ async def non_stream_request(
 
                     if not await refresh_credential_fast():
                         log.error("[NON-STREAM] 重试时无可用凭证或刷新失败")
+                        await record_panel_usage_event(
+                            api_tag=api_tag,
+                            model_name=model_name,
+                            credential_name=current_file,
+                            success=False,
+                            status_code=500,
+                            error_message="重试时无可用凭证或刷新失败",
+                        )
                         return Response(
                             content=json.dumps({"error": "当前无可用凭证"}),
                             status_code=500,
@@ -626,6 +770,15 @@ async def non_stream_request(
                     continue  # 重试
                 else:
                     log.error(f"[NON-STREAM] 达到最大重试次数，返回404错误")
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=status_code,
+                        token_stats=extract_token_stats_from_text(error_text),
+                        error_message=error_text,
+                    )
                     return last_error_response
             else:
                 # 错误码不在重试范围内，直接返回
@@ -634,6 +787,15 @@ async def non_stream_request(
                     credential_manager, current_file, status_code,
                     None, mode="geminicli", model_name=model_name,
                     error_message=error_text
+                )
+                await record_panel_usage_event(
+                    api_tag=api_tag,
+                    model_name=model_name,
+                    credential_name=current_file,
+                    success=False,
+                    status_code=status_code,
+                    token_stats=extract_token_stats_from_text(error_text),
+                    error_message=error_text,
                 )
                 return last_error_response
 
@@ -647,8 +809,24 @@ async def non_stream_request(
                 # 所有重试都失败，返回最后一次的错误（如果有）或500错误
                 log.error(f"[NON-STREAM] 所有重试均失败，最后异常: {e}")
                 if last_error_response:
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=last_error_response.status_code,
+                        error_message=str(e),
+                    )
                     return last_error_response
                 else:
+                    await record_panel_usage_event(
+                        api_tag=api_tag,
+                        model_name=model_name,
+                        credential_name=current_file,
+                        success=False,
+                        status_code=500,
+                        error_message=str(e),
+                    )
                     return Response(
                         content=json.dumps({"error": f"请求异常: {str(e)}"}),
                         status_code=500,
@@ -657,6 +835,24 @@ async def non_stream_request(
 
     # 所有重试都失败，返回最后一次的原始错误
     log.error("[NON-STREAM] 所有重试均失败")
+    if last_error_response:
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name=current_file,
+            success=False,
+            status_code=last_error_response.status_code,
+            error_message="所有重试均失败",
+        )
+    else:
+        await record_panel_usage_event(
+            api_tag=api_tag,
+            model_name=model_name,
+            credential_name=current_file,
+            success=False,
+            status_code=500,
+            error_message="所有重试均失败",
+        )
     return last_error_response
 
 

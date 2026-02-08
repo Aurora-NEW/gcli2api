@@ -116,7 +116,7 @@ async def messages(
     if not is_streaming:
         # 调用 API 层的非流式请求
         from src.api.geminicli import non_stream_request
-        response = await non_stream_request(body=api_request)
+        response = await non_stream_request(body=api_request, api_tag="geminicli/anthropic")
 
         # 检查响应状态码
         status_code = getattr(response, "status_code", 200)
@@ -156,7 +156,7 @@ async def messages(
         # 异步发送实际请求
         async def get_response():
             from src.api.geminicli import non_stream_request
-            response = await non_stream_request(body=api_request)
+            response = await non_stream_request(body=api_request, api_tag="geminicli/anthropic")
             return response
 
         # 创建请求任务
@@ -286,7 +286,7 @@ async def messages(
         # 定义流式请求函数（返回 StreamingResponse）
         async def stream_request_wrapper(payload):
             # stream_request 返回异步生成器，需要包装成 StreamingResponse
-            stream_gen = stream_request(body=payload, native=False)
+            stream_gen = stream_request(body=payload, native=False, api_tag="geminicli/anthropic")
             return StreamingResponse(stream_gen, media_type="text/event-stream")
 
         # 创建反截断处理器
@@ -320,7 +320,7 @@ async def messages(
         from src.converter.anthropic2gemini import gemini_stream_to_anthropic_stream
 
         # 调用 API 层的流式请求（不使用 native 模式）
-        stream_gen = stream_request(body=api_request, native=False)
+        stream_gen = stream_request(body=api_request, native=False, api_tag="geminicli/anthropic")
 
         # 包装流式生成器以处理错误响应
         async def gemini_chunk_wrapper():

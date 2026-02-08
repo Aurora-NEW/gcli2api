@@ -113,7 +113,7 @@ async def chat_completions(
     if not is_streaming:
         # 调用 API 层的非流式请求
         from src.api.antigravity import non_stream_request
-        response = await non_stream_request(body=api_request)
+        response = await non_stream_request(body=api_request, api_tag="antigravity/openai")
 
         # 检查响应状态码
         status_code = getattr(response, "status_code", 200)
@@ -153,7 +153,7 @@ async def chat_completions(
         # 异步发送实际请求
         async def get_response():
             from src.api.antigravity import non_stream_request
-            response = await non_stream_request(body=api_request)
+            response = await non_stream_request(body=api_request, api_tag="antigravity/openai")
             return response
 
         # 创建请求任务
@@ -286,7 +286,7 @@ async def chat_completions(
         # 定义流式请求函数（返回 StreamingResponse）
         async def stream_request_wrapper(payload):
             # stream_request 返回异步生成器，需要包装成 StreamingResponse
-            stream_gen = stream_request(body=payload, native=False)
+            stream_gen = stream_request(body=payload, native=False, api_tag="antigravity/openai")
             return StreamingResponse(stream_gen, media_type="text/event-stream")
 
         # 创建反截断处理器
@@ -345,7 +345,7 @@ async def chat_completions(
         import uuid
 
         # 调用 API 层的流式请求（不使用 native 模式）
-        stream_gen = stream_request(body=api_request, native=False)
+        stream_gen = stream_request(body=api_request, native=False, api_tag="antigravity/openai")
 
         response_id = str(uuid.uuid4())
 

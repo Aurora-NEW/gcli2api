@@ -1362,6 +1362,8 @@
                 <button class="tab" onclick="switchTab('manage')">GCLI凭证管理</button>
                 <button class="tab" onclick="switchTab('antigravity-manage')">Antigravity凭证管理</button>
                 <button class="tab" onclick="switchTab('config')">配置管理</button>
+                <button class="tab" onclick="switchTab('usage')">使用统计</button>
+                <button class="tab" onclick="switchTab('monitor')">高级监控</button>
                 <button class="tab" onclick="switchTab('logs')">实时日志</button>
                 <button class="tab" onclick="switchTab('about')">项目信息</button>
             </div>
@@ -2155,6 +2157,54 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- 使用统计标签页 -->
+            <div id="usageTab" class="tab-content">
+                <h3>使用统计</h3>
+                <p>查看近24小时请求次数，并可跳转高级监控看板。</p>
+
+                <div class="manage-actions">
+                    <button class="refresh-btn" onclick="refreshUsageStats()">刷新统计</button>
+                    <button class="btn" style="background-color: #dc3545;" onclick="resetAllUsageStats()">重置全部统计</button>
+                    <button class="btn" style="background-color: #6f42c1;" onclick="openMonitorDashboard()">打开高级监控面板</button>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                    <div class="status info" style="margin: 0;">
+                        <strong>24h总调用</strong>
+                        <div id="totalApiCalls" style="font-size: 24px; margin-top: 6px;">0</div>
+                    </div>
+                    <div class="status info" style="margin: 0;">
+                        <strong>凭证文件数</strong>
+                        <div id="totalFiles" style="font-size: 24px; margin-top: 6px;">0</div>
+                    </div>
+                    <div class="status info" style="margin: 0;">
+                        <strong>平均调用/文件</strong>
+                        <div id="avgCallsPerFile" style="font-size: 24px; margin-top: 6px;">0.0</div>
+                    </div>
+                </div>
+
+                <div id="usageLoading" class="status info" style="display: none;">正在加载使用统计...</div>
+                <div id="usageList"></div>
+            </div>
+
+            <!-- 高级监控标签页 -->
+            <div id="monitorTab" class="tab-content">
+                <h3>高级监控</h3>
+                <p>CPAMC 风格监控面板，支持图表和详细请求分析。</p>
+
+                <div class="manage-actions">
+                    <button class="refresh-btn" onclick="initMonitorPanel()">加载面板</button>
+                    <button class="btn" style="background-color: #17a2b8;" onclick="refreshMonitorPanel()">刷新面板</button>
+                    <button class="btn" style="background-color: #6f42c1;" onclick="openMonitorDashboard()">新窗口打开</button>
+                </div>
+
+                <iframe
+                    id="monitorIframe"
+                    title="高级监控面板"
+                    style="width: 100%; height: 80vh; border: 1px solid #dee2e6; border-radius: 8px; background: #fff;"
+                    loading="lazy"></iframe>
             </div>
 
             <!-- 实时日志标签页 -->
