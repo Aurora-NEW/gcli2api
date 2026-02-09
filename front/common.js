@@ -927,12 +927,13 @@ function switchTab(tabName) {
     // 如果点击的是当前标签页，不做任何操作
     if (currentContent === targetContent) return;
 
-    // 找到目标标签按钮
+    // 找到目标标签按钮 (支持 .tab 和 .nav-tab 类)
     const targetTab = event && event.target ? event.target :
+        document.querySelector(`.nav-tab[onclick*="'${tabName}'"]`) ||
         document.querySelector(`.tab[onclick*="'${tabName}'"]`);
 
-    // 移除所有标签页的active状态
-    document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+    // 移除所有标签页的active状态 (支持 .tab 和 .nav-tab 类)
+    document.querySelectorAll('.tab, .nav-tab').forEach(tab => tab.classList.remove('active'));
 
     // 添加当前点击标签的active状态
     if (targetTab) {
@@ -2342,6 +2343,29 @@ async function deduplicateAntigravityByEmail() {
 // =====================================================================
 // WebSocket日志相关
 // =====================================================================
+function updateLogConnectionStatus(text, level = 'info') {
+    const statusContainer = document.getElementById('logConnectionStatus');
+    if (statusContainer) {
+        statusContainer.className = `status ${level}`;
+    }
+
+    const statusText = document.getElementById('connectionStatusText');
+    if (!statusText) return;
+
+    // 新版桌面样式：connection-status + status-dot
+    if (statusText.classList.contains('connection-status')) {
+        let dotClass = 'offline';
+        if (level === 'success') dotClass = 'online';
+        if (level === 'error') dotClass = 'error';
+        if (text.includes('连接中')) dotClass = 'connecting';
+        statusText.innerHTML = `<span class="status-dot ${dotClass}"></span>${text}`;
+        return;
+    }
+
+    // 旧版样式：纯文本
+    statusText.textContent = text;
+}
+
 function connectWebSocket() {
     if (AppState.logWebSocket && AppState.logWebSocket.readyState === WebSocket.OPEN) {
         showStatus('WebSocket已经连接', 'info');
@@ -2355,14 +2379,12 @@ function connectWebSocket() {
         // 添加 token 认证参数
         const wsUrlWithAuth = `${wsUrl}?token=${encodeURIComponent(AppState.authToken)}`;
 
-        document.getElementById('connectionStatusText').textContent = '连接中...';
-        document.getElementById('logConnectionStatus').className = 'status info';
+        updateLogConnectionStatus('连接中...', 'info');
 
         AppState.logWebSocket = new WebSocket(wsUrlWithAuth);
 
         AppState.logWebSocket.onopen = () => {
-            document.getElementById('connectionStatusText').textContent = '已连接';
-            document.getElementById('logConnectionStatus').className = 'status success';
+            updateLogConnectionStatus('已连接', 'success');
             showStatus('日志流连接成功', 'success');
             clearLogsDisplay();
         };
@@ -2383,20 +2405,17 @@ function connectWebSocket() {
         };
 
         AppState.logWebSocket.onclose = () => {
-            document.getElementById('connectionStatusText').textContent = '连接断开';
-            document.getElementById('logConnectionStatus').className = 'status error';
+            updateLogConnectionStatus('连接断开', 'error');
             showStatus('日志流连接断开', 'info');
         };
 
         AppState.logWebSocket.onerror = (error) => {
-            document.getElementById('connectionStatusText').textContent = '连接错误';
-            document.getElementById('logConnectionStatus').className = 'status error';
+            updateLogConnectionStatus('连接错误', 'error');
             showStatus('日志流连接错误: ' + error, 'error');
         };
     } catch (error) {
         showStatus('创建WebSocket连接失败: ' + error.message, 'error');
-        document.getElementById('connectionStatusText').textContent = '连接失败';
-        document.getElementById('logConnectionStatus').className = 'status error';
+        updateLogConnectionStatus('连接失败', 'error');
     }
 }
 
@@ -2404,8 +2423,7 @@ function disconnectWebSocket() {
     if (AppState.logWebSocket) {
         AppState.logWebSocket.close();
         AppState.logWebSocket = null;
-        document.getElementById('connectionStatusText').textContent = '未连接';
-        document.getElementById('logConnectionStatus').className = 'status info';
+        updateLogConnectionStatus('未连接', 'info');
         showStatus('日志流连接已断开', 'info');
     }
 }

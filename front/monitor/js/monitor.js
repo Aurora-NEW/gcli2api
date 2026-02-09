@@ -124,7 +124,7 @@ updateChartGlobalDefaults();
 const i18n = {
   zh: {
     // 页面标题和头部
-    pageTitle: "CLIProxyAPI 监控中心",
+    pageTitle: "GCLI2API 监控中心",
     pageSubtitle: "可视化监控请求状态与资源消耗，快速定位问题渠道",
     timeRange: "时间范围",
     today: "今天",
@@ -327,7 +327,7 @@ const i18n = {
   },
   en: {
     // Page Title and Header
-    pageTitle: "CLIProxyAPI Monitor Center",
+    pageTitle: "GCLI2API Monitor Center",
     pageSubtitle: "Visual monitoring of request status and resource consumption, quickly locate problematic channels",
     timeRange: "Time Range",
     today: "Today",
