@@ -556,11 +556,11 @@
       border-color: rgba(239, 68, 68, 0.2);
     }
     /* 日间模式 - 侧边导航 */
-    [data-theme="light"] .side-nav-item {
+    [data-theme="light"] .side-nav:hover .side-nav-item {
       background: #ffffff;
       border-color: var(--border);
     }
-    [data-theme="light"] .side-nav-item:hover {
+    [data-theme="light"] .side-nav:hover .side-nav-item:hover {
       background: rgba(59, 130, 246, 0.08);
     }
     [data-theme="light"] .side-nav-item.active {
@@ -570,7 +570,7 @@
     [data-theme="light"] .side-nav-label {
       color: var(--muted);
     }
-    [data-theme="light"] .side-nav-item:hover .side-nav-label {
+    [data-theme="light"] .side-nav:hover .side-nav-item:hover .side-nav-label {
       color: var(--text);
     }
     [data-theme="light"] .side-nav-item.active .side-nav-label {
@@ -579,7 +579,7 @@
     [data-theme="light"] .side-nav-dot {
       background: var(--dim);
     }
-    [data-theme="light"] .side-nav-item:hover .side-nav-dot {
+    [data-theme="light"] .side-nav:hover .side-nav-item:hover .side-nav-dot {
       background: var(--accent-blue);
     }
     [data-theme="light"] .side-nav-item.active .side-nav-dot {
@@ -2060,32 +2060,60 @@
       opacity: 0.5;
       cursor: not-allowed;
     }
-    /* 固定侧边导航样式 */
+    /* 固定侧边导航样式 - 默认收在左侧外边，不遮挡图表区域 */
     .side-nav {
       position: fixed;
-      left: 20px;
+      left: -102px;
       top: 50%;
       transform: translateY(-50%);
       z-index: 100;
       display: flex;
       flex-direction: column;
       gap: 6px;
+      padding: 10px;
+      opacity: 0.92;
+      background: var(--layer);
+      border: 1px solid var(--border);
+      border-left: none;
+      border-radius: 0 12px 12px 0;
+      backdrop-filter: blur(12px);
+      box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+      transition: left 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+    }
+    .side-nav:hover,
+    .side-nav:focus-within {
+      left: 0;
+      opacity: 1;
+    }
+    .side-nav .side-nav-label {
+      max-width: 80px;
+      overflow: hidden;
+      opacity: 1;
+      transition: color 0.25s ease;
+    }
+    .side-nav .side-nav-item {
+      padding: 8px 12px;
+      min-width: auto;
+      background: var(--layer);
+      border: 1px solid var(--border);
+      gap: 10px;
+      border-radius: 12px;
+      transition: all 0.25s ease;
+    }
+    .side-nav .side-nav-dot {
+      width: 8px;
+      height: 8px;
+      transition: all 0.25s ease;
     }
     .side-nav-item {
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      gap: 10px;
       cursor: pointer;
-      padding: 8px 12px;
       border-radius: 12px;
-      background: var(--layer);
-      border: 1px solid var(--border);
-      transition: all 0.25s ease;
-      min-width: 48px;
       backdrop-filter: blur(8px);
     }
-    .side-nav-item:hover {
+    .side-nav .side-nav-item:hover {
       border-color: var(--accent-blue);
       background: rgba(59, 130, 246, 0.15);
     }
@@ -2110,14 +2138,11 @@
       color: var(--accent-cyan);
     }
     .side-nav-dot {
-      width: 8px;
-      height: 8px;
       border-radius: 50%;
       background: var(--dim);
       flex-shrink: 0;
-      transition: all 0.25s ease;
     }
-    .side-nav-item:hover .side-nav-dot {
+    .side-nav .side-nav-item:hover .side-nav-dot {
       background: var(--accent-blue);
     }
     /* 为导航定位添加滚动偏移 */
@@ -2126,10 +2151,7 @@
     }
     @media (max-width: 1200px) {
       .side-nav {
-        left: 10px;
-      }
-      .side-nav-label {
-        display: none;
+        left: -124px;
       }
     }
     @media (max-width: 768px) {
